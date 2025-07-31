@@ -1,39 +1,39 @@
 #include <WiFi.h>
 #include <WebSocketsClient_Generic.h>
 #include <ArduinoJson.h>
- 
+
 const char *ssid = "Wokwi-GUEST";
 const char *password = "";
- 
-#define LR1 5 // Red traffic light 1 connected in pin 5
+
+#define LR1 5 // Red traffic light 1 connected in pin 5 (test comment)
 #define LY1 4 // Yellow traffic light 1 connected in pin 4
 #define LG1 6 // Green traffic light 1 connected in pin 6
- 
+
 #define LR2 7  // Red traffic light 2 connected in pin 7
 #define LY2 15 // Yellow traffic light 2 connected in pin 15
 #define LG2 16 // Green traffic light 2 connected in pin 16
 #define ROJO 0
 #define SENSOR_PIN 12
- 
+
 // Estructura para semáforo
 struct Semaforo
 {
   int pinR, pinA, pinV;
   bool R, A, V;
 };
- 
+
 Semaforo sem1 = {LR1, LY1, LG1, 0, 0, 0};
 Semaforo sem2 = {LR2, LY2, LG2, 0, 0, 0};
- 
+
 int estado = 0;
 int sensorLocal = 1023;
 int sensorRemoto = 1023;
- 
+
 WebSocketsClient webSocket;
- 
+
 unsigned long lastSent = 0;
 const unsigned long interval = 2000;
- 
+
 // Handle incoming WebSocket messages
 void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
 {
@@ -70,22 +70,22 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
     break;
   }
 }
- 
+
 long unsigned tini, tactual, tdelta;
- 
+
 void medir()
 {
   tactual = millis();
   tdelta = tactual - tini;
 }
- 
+
 void setSemaforo(Semaforo &sem, bool r, bool a, bool v)
 {
   sem.R = r;
   sem.A = a;
   sem.V = v;
 }
- 
+
 void controlar()
 {
   switch (estado)
@@ -134,7 +134,7 @@ void controlar()
     break;
   }
 }
- 
+
 void actuar()
 {
   digitalWrite(sem1.pinR, sem1.R);
@@ -144,7 +144,7 @@ void actuar()
   digitalWrite(sem2.pinA, sem2.A);
   digitalWrite(sem2.pinV, sem2.V);
 }
- 
+
 void setup()
 {
   Serial.begin(115200);
@@ -154,10 +154,10 @@ void setup()
   pinMode(LR2, OUTPUT);
   pinMode(LY2, OUTPUT);
   pinMode(LG2, OUTPUT);
- 
+
   actuar();
   tini = millis();
- 
+
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
   while (WiFi.status() != WL_CONNECTED)
@@ -166,23 +166,23 @@ void setup()
     delay(1000);
   }
   Serial.println("\nConnected to WiFi");
- 
+
   // Setup secure WebSocket client (wss)
   webSocket.beginSSL("ws.davinsony.com", 443, "/gabriel_tatiana");
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(5000);
 }
- 
+
 void loop()
 {
   webSocket.loop();
- 
+
   unsigned long now = millis();
   if (now - lastSent > interval && webSocket.isConnected())
   {
     lastSent = now;
     sensorLocal = analogRead(SENSOR_PIN);
- 
+
     // Enviar el valor local al remoto
     StaticJsonDocument<100> doc;
     doc["sensor"] = sensorLocal;
@@ -193,7 +193,7 @@ void loop()
     webSocket.sendTXT(json);
     Serial.println("Sent: " + json);
   }
- 
+
   static bool enPrioridad = false;
   medir();
   // Lógica de prioridad: si local o remoto < 600, forzar semáforo 2 en verde y 1 en rojo
