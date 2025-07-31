@@ -225,7 +225,22 @@ void loop()
     cny5Value = digitalRead(CNY5);
     cny6Value = digitalRead(CNY6);
 
-    // Mostrar valores por Serial para pruebas
+    // --- Lote 2: Determinación de estados y condiciones ---
+    // 1. Modo día/noche (umbral ejemplo: 400)
+    bool esNoche = (ldr1Value < 400 && ldr2Value < 400);
+
+    // 2. Conteo de vehículos por carril (CNY1-3: semáforo 1, CNY4-6: semáforo 2)
+    int vehiculosSem1 = (cny1Value == 0 ? 1 : 0) + (cny2Value == 0 ? 1 : 0) + (cny3Value == 0 ? 1 : 0);
+    int vehiculosSem2 = (cny4Value == 0 ? 1 : 0) + (cny5Value == 0 ? 1 : 0) + (cny6Value == 0 ? 1 : 0);
+
+    // 3. Peatones esperando
+    bool peaton1 = (p1Value == 1); // Botón presionado
+    bool peaton2 = (p2Value == 1);
+
+    // 4. Calidad del aire (umbral ejemplo: 200)
+    bool co2Alto = (co2Value > 200);
+
+    // Mostrar valores y estados por Serial
     Serial.print("LDR1: ");
     Serial.print(ldr1Value);
     Serial.print(" | LDR2: ");
@@ -247,7 +262,21 @@ void loop()
     Serial.print(" | CNY5: ");
     Serial.print(cny5Value);
     Serial.print(" | CNY6: ");
-    Serial.println(cny6Value);
+    Serial.print(cny6Value);
+    Serial.println();
+
+    Serial.print("Estado: ");
+    Serial.print(esNoche ? "NOCHE" : "DIA");
+    Serial.print(" | Vehículos Sem1: ");
+    Serial.print(vehiculosSem1);
+    Serial.print(" | Vehículos Sem2: ");
+    Serial.print(vehiculosSem2);
+    Serial.print(" | Peatón1: ");
+    Serial.print(peaton1 ? "SI" : "NO");
+    Serial.print(" | Peatón2: ");
+    Serial.print(peaton2 ? "SI" : "NO");
+    Serial.print(" | CO2 alto: ");
+    Serial.println(co2Alto ? "SI" : "NO");
 
     // --- WebSocket deshabilitado temporalmente para pruebas locales ---
     // unsigned long now = millis();
@@ -286,5 +315,5 @@ void loop()
         controlar(); // Ciclo normal
     }
     actuar();
-    delay(2000); // Espera 5 segundos para facilitar la visualización en el monitor serie
+    delay(2000); // Espera 2 segundos para facilitar la visualización en el monitor serie
 }
