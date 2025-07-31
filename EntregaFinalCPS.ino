@@ -5,7 +5,7 @@
 const char *ssid = "Wokwi-GUEST";
 const char *password = "";
 
-#define LR1 5 // Red traffic light 1 connected in pin 5 (test comment)
+#define LR1 5 // Red traffic light 1 connected in pin 5
 #define LY1 4 // Yellow traffic light 1 connected in pin 4
 #define LG1 6 // Green traffic light 1 connected in pin 6
 
