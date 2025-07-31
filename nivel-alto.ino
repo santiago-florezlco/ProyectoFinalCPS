@@ -297,22 +297,109 @@ void loop()
     // }
 
     static bool enPrioridad = false;
-    medir();
-    // Lógica de prioridad: si local o remoto < 600, forzar semáforo 2 en verde y 1 en rojo
-    if (sensorLocal < 600 || sensorRemoto < 600)
+    static unsigned long tiniAdapt = 0;
+    static int estadoAdapt = 0;
+    static int tiempoVerde1 = 6000;
+    static int tiempoVerde2 = 6000;
+    static int tiempoAmarillo = 2000;
+    static int tiempoRojo = 0; // No usado explícitamente
+
+    // --- Lógica adaptativa de semáforos ---
+    // Ajuste de tiempos según tráfico y condiciones
+    // Verde más largo si hay más vehículos, más corto si hay pocos
+    if (vehiculosSem1 > vehiculosSem2)
     {
-        setSemaforo(sem1, 1, 0, 0); // Semáforo 1 rojo
-        setSemaforo(sem2, 0, 0, 1); // Semáforo 2 verde
-        enPrioridad = true;
+        tiempoVerde1 = 8000;
+        tiempoVerde2 = 4000;
+    }
+    else if (vehiculosSem2 > vehiculosSem1)
+    {
+        tiempoVerde1 = 4000;
+        tiempoVerde2 = 8000;
     }
     else
     {
-        if (enPrioridad)
+        tiempoVerde1 = 6000;
+        tiempoVerde2 = 6000;
+    }
+    // Si hay CO2 alto, reducir ambos verdes para evitar congestión
+    if (co2Alto)
+    {
+        tiempoVerde1 -= 2000;
+        tiempoVerde2 -= 2000;
+        if (tiempoVerde1 < 2000)
+            tiempoVerde1 = 2000;
+        if (tiempoVerde2 < 2000)
+            tiempoVerde2 = 2000;
+    }
+    // Si es de noche, aumentar amarillo
+    if (esNoche)
+    {
+        tiempoAmarillo = 3000;
+    }
+    else
+    {
+        tiempoAmarillo = 2000;
+    }
+
+    // Prioridad peatón: si hay peatón esperando, forzar verde peatonal en el siguiente ciclo
+    static bool prioridadPeaton1 = false;
+    static bool prioridadPeaton2 = false;
+    if (peaton1)
+        prioridadPeaton1 = true;
+    if (peaton2)
+        prioridadPeaton2 = true;
+
+    medir();
+    unsigned long tdeltaAdapt = millis() - tiniAdapt;
+
+    // Estados: 0=Sem1 rojo/Sem2 verde, 1=Sem1 rojo/Sem2 amarillo, 2=Sem1 verde/Sem2 rojo, 3=Sem1 amarillo/Sem2 rojo
+    switch (estadoAdapt)
+    {
+    case 0: // Sem1 rojo, Sem2 verde
+        setSemaforo(sem1, 1, 0, 0);
+        setSemaforo(sem2, 0, 0, 1);
+        if (tdeltaAdapt >= tiempoVerde2 || prioridadPeaton1)
         {
-            tini = millis(); // Reiniciar temporizador al salir de prioridad
-            enPrioridad = false;
+            estadoAdapt = 1;
+            tiniAdapt = millis();
         }
-        controlar(); // Ciclo normal
+        break;
+    case 1: // Sem1 rojo, Sem2 amarillo
+        setSemaforo(sem1, 1, 0, 0);
+        setSemaforo(sem2, 0, 1, 0);
+        if (tdeltaAdapt >= tiempoAmarillo)
+        {
+            estadoAdapt = 2;
+            tiniAdapt = millis();
+            if (prioridadPeaton1)
+                prioridadPeaton1 = false;
+        }
+        break;
+    case 2: // Sem1 verde, Sem2 rojo
+        setSemaforo(sem1, 0, 0, 1);
+        setSemaforo(sem2, 1, 0, 0);
+        if (tdeltaAdapt >= tiempoVerde1 || prioridadPeaton2)
+        {
+            estadoAdapt = 3;
+            tiniAdapt = millis();
+        }
+        break;
+    case 3: // Sem1 amarillo, Sem2 rojo
+        setSemaforo(sem1, 0, 1, 0);
+        setSemaforo(sem2, 1, 0, 0);
+        if (tdeltaAdapt >= tiempoAmarillo)
+        {
+            estadoAdapt = 0;
+            tiniAdapt = millis();
+            if (prioridadPeaton2)
+                prioridadPeaton2 = false;
+        }
+        break;
+    default:
+        estadoAdapt = 0;
+        tiniAdapt = millis();
+        break;
     }
     actuar();
     delay(2000); // Espera 2 segundos para facilitar la visualización en el monitor serie
