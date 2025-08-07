@@ -2,13 +2,13 @@
 #include <Wire.h>              // Para I2C
 #include <LiquidCrystal_I2C.h> // Para display LCD I2C
 #include <WiFi.h>
-#include <WebSocketsClient_Generic.h>
+#include <WebSocketsClient.h>
 #include <ArduinoJson.h>
 // Inicialización del display LCD I2C (dirección 0x27, 20 columnas, 4 filas)
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
-const char *ssid = "latierrita";
-const char *password = "lote1706";
+const char *ssid = "Wokwi-GUEST";
+const char *password = "";
 
 #define LDR1 13 // LDR Light sensor from traffic light 1 connected in pin 13
 #define LDR2 12 // LDR Light sensor from traffic light 2 connected in pin 12
@@ -211,7 +211,7 @@ void setup()
     Serial.println("\nConnected to WiFi");
 
     // Setup WebSocket client (ws, para pruebas locales)
-    webSocket.begin("192.168.80.18", 8765, "/");
+    webSocket.begin("192.168.1.2", 8765, "/");
     webSocket.onEvent(webSocketEvent);
     webSocket.setReconnectInterval(5000);
 }
@@ -241,9 +241,13 @@ void loop()
     int vehiculosSem1 = (cny1Value == 0 ? 1 : 0) + (cny2Value == 0 ? 1 : 0) + (cny3Value == 0 ? 1 : 0);
     int vehiculosSem2 = (cny4Value == 0 ? 1 : 0) + (cny5Value == 0 ? 1 : 0) + (cny6Value == 0 ? 1 : 0);
 
-    // 3. Peatones esperando
-    bool peaton1 = (p1Value == 1); // Botón presionado
-    bool peaton2 = (p2Value == 1);
+    // 3. Peatones esperando SIMULADOR
+    bool peaton1 = (p1Value == 0); // Botón presionado
+    bool peaton2 = (p2Value == 0);
+
+    // 3. Peatones esperando PLACA REAL
+    //bool peaton1 = (p1Value == 0); // Botón presionado
+    //bool peaton2 = (p2Value == 0);
 
     // 4. Calidad del aire (umbral ejemplo: 200)
     bool co2Alto = (co2Value > 200);
@@ -298,8 +302,10 @@ void loop()
         doc["co2"] = co2Value;
         doc["vehiculosSem1"] = (cny1Value == 0 ? 1 : 0) + (cny2Value == 0 ? 1 : 0) + (cny3Value == 0 ? 1 : 0);
         doc["vehiculosSem2"] = (cny4Value == 0 ? 1 : 0) + (cny5Value == 0 ? 1 : 0) + (cny6Value == 0 ? 1 : 0);
-        doc["peaton1"] = (p1Value == 1);
-        doc["peaton2"] = (p2Value == 1);
+        doc["peaton1"] = (p1Value == 0); //SIMULADOR
+        doc["peaton2"] = (p2Value == 0); //SIMULADOR
+        //doc["peaton1"] = (p1Value == 0); // PLACA REAL
+        //doc["peaton2"] = (p2Value == 0); // PLACA REAL
         doc["co2Alto"] = (co2Value > 200);
         doc["esNoche"] = (ldr1Value < 400 && ldr2Value < 400);
         String json;
