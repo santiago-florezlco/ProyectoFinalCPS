@@ -12,10 +12,10 @@ STATES = ["Normal", "Moderado", "Congestionado"]
 # Matriz de transición: fila = estado actual, columna = siguiente estado
 # Ejemplo simple, los valores pueden ajustarse según pruebas
 TRANSITION_MATRIX = [
-    # Normal      Moderado    Congestionado
-    [0.7,         0.25,       0.05],      # Desde Normal
-    [0.2,         0.6,        0.2],       # Desde Moderado
-    [0.05,        0.25,       0.7]        # Desde Congestionado
+# Normal      Moderado    Congestionado
+    [0.8,   0.2,    0.0],    # Desde Normal
+    [0.3,   0.6,    0.1],    # Desde Moderado
+    [0.1,   0.3,    0.6],    # Desde Congestionado
 ]
 
 # Estado global inicial
@@ -50,13 +50,16 @@ def evaluar_estado(datos):
         probs[2] -= 0.1
     # Si hay peatones esperando, favorecer Moderado
     if peaton1 or peaton2:
-        probs[1] += 0.1
+        probs[1] += 0.15
         probs[0] -= 0.05
         probs[2] -= 0.05
 
     # Normalizar para que sumen 1
+    probs = [max(0, p) for p in probs]  # primero limpiar negativos
     total = sum(probs)
-    probs = [max(0, p/total) for p in probs]
+    probs = [p / total if total > 0 else 1/3 for p in probs]   
+
+    print(f"Probabilidades normalizadas: {probs}, suma: {sum(probs)}")  # <-- Agrega esta línea
 
     # Elegir el siguiente estado según las probabilidades
     next_state = random.choices([0,1,2], weights=probs)[0]
