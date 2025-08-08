@@ -1,8 +1,8 @@
-
 #include <Wire.h>              // Para I2C
 #include <LiquidCrystal_I2C.h> // Para display LCD I2C
 #include <WiFi.h>
 #include <WebSocketsClient_Generic.h>
+#include <WebSocketsServer_Generic.h>
 #include <ArduinoJson.h>
 // Inicialización del display LCD I2C (dirección 0x27, 20 columnas, 4 filas)
 LiquidCrystal_I2C lcd(0x27, 20, 4);
@@ -56,7 +56,8 @@ int cny4Value = 0;
 int cny5Value = 0;
 int cny6Value = 0;
 
-WebSocketsClient webSocket;
+WebSocketsClient webSocketMarkov;    // Cliente para servidor Markov
+WebSocketsServer webSocketVoz(8766); // Servidor para comandos de voz
 
 unsigned long lastSent = 0;
 const unsigned long interval = 2000;
@@ -67,21 +68,25 @@ int tiempoVerde1Adaptado = 6000; // Tiempos adaptativos
 int tiempoVerde2Adaptado = 6000;
 int tiempoAmarilloAdaptado = 2000;
 
-// Handle incoming WebSocket messages
-void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
+// Variables para control por voz
+String modoControl = "automatico"; // "automatico", "manual", "emergencia", "nocturno"
+bool comandoVozActivo = false;
+unsigned long tiempoComandoVoz = 0;
+
+// Handle incoming WebSocket messages from Markov server
+void webSocketMarkovEvent(WStype_t type, uint8_t *payload, size_t length)
 {
     switch (type)
     {
     case WStype_CONNECTED:
-        Serial.println("Connected to WebSocket server");
+        Serial.println("Connected to Markov WebSocket server");
         break;
     case WStype_DISCONNECTED:
-        Serial.println("Disconnected from WebSocket server");
+        Serial.println("Disconnected from Markov WebSocket server");
         break;
     case WStype_TEXT:
     {
-        Serial.printf("Received: %s\n", payload);
-        // Parse the incoming JSON message
+        Serial.printf("Received from Markov: %s\n", payload);
         StaticJsonDocument<200> doc;
         DeserializationError error = deserializeJson(doc, payload);
         if (error)
@@ -97,8 +102,6 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
             estadoMarkov = doc["estado"].as<String>();
             Serial.print("Estado Markov recibido: ");
             Serial.println(estadoMarkov);
-
-            // Adaptar tiempos de semáforo según estado Markov
             adaptarTiemposSemaforo();
         }
 
@@ -108,6 +111,44 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
             sensorRemoto = doc["msg"];
             Serial.print("Sensor remoto: ");
             Serial.println(sensorRemoto);
+        }
+    }
+    break;
+    default:
+        break;
+    }
+}
+
+// Handle incoming WebSocket messages from Voice Control
+void webSocketVozEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
+{
+    switch (type)
+    {
+    case WStype_CONNECTED:
+        Serial.printf("Voice client [%u] connected\n", num);
+        break;
+    case WStype_DISCONNECTED:
+        Serial.printf("Voice client [%u] disconnected\n", num);
+        break;
+    case WStype_TEXT:
+    {
+        Serial.printf("Voice command received from [%u]: %s\n", num, payload);
+        StaticJsonDocument<200> doc;
+        DeserializationError error = deserializeJson(doc, payload);
+        if (error)
+        {
+            Serial.print("Voice JSON parsing failed: ");
+            Serial.println(error.c_str());
+            break;
+        }
+
+        // Manejo de comandos de voz
+        if (doc.containsKey("tipo") && doc["tipo"] == "comando_voz")
+        {
+            String comando = doc["comando"].as<String>();
+            Serial.print("🎤 Comando de voz recibido: ");
+            Serial.println(comando);
+            procesarComandoVoz(comando);
         }
     }
     break;
@@ -142,6 +183,94 @@ void adaptarTiemposSemaforo()
         tiempoVerde2Adaptado = 10000;
         tiempoAmarilloAdaptado = 3000;
         Serial.println("[ADAPTACIÓN] Modo Congestionado: tiempos largos");
+    }
+}
+
+// NUEVO: Función para procesar comandos de voz
+void procesarComandoVoz(String comando)
+{
+    comandoVozActivo = true;
+    tiempoComandoVoz = millis();
+
+    // Comandos de modo
+    if (comando == "modo_automatico")
+    {
+        modoControl = "automatico";
+        Serial.println("🎤 Modo automático activado");
+    }
+    else if (comando == "modo_manual")
+    {
+        modoControl = "manual";
+        Serial.println("🎤 Modo manual activado");
+    }
+    else if (comando == "modo_emergencia")
+    {
+        modoControl = "emergencia";
+        Serial.println("🎤 ¡MODO EMERGENCIA ACTIVADO!");
+        // Poner todos en rojo inmediatamente
+        setSemaforo(sem1, 1, 0, 0);
+        setSemaforo(sem2, 1, 0, 0);
+        actuar();
+    }
+    else if (comando == "modo_nocturno")
+    {
+        modoControl = "nocturno";
+        Serial.println("🎤 Modo nocturno forzado");
+    }
+
+    // Control directo de semáforos
+    else if (comando == "sem1_verde")
+    {
+        modoControl = "manual"; // Activar modo manual automáticamente
+        setSemaforo(sem1, 0, 0, 1);
+        setSemaforo(sem2, 1, 0, 0);
+        actuar();
+        Serial.println("🎤 Semáforo 1 puesto en verde (modo manual)");
+    }
+    else if (comando == "sem2_verde")
+    {
+        modoControl = "manual"; // Activar modo manual automáticamente
+        setSemaforo(sem1, 1, 0, 0);
+        setSemaforo(sem2, 0, 0, 1);
+        actuar();
+        Serial.println("🎤 Semáforo 2 puesto en verde (modo manual)");
+    }
+    else if (comando == "todos_rojo")
+    {
+        modoControl = "emergencia"; // Cambiar a modo emergencia para que perdure
+        setSemaforo(sem1, 1, 0, 0);
+        setSemaforo(sem2, 1, 0, 0);
+        actuar();
+        Serial.println("🎤 Todos los semáforos en rojo (modo emergencia)");
+    }
+    else if (comando == "todos_amarillo")
+    {
+        setSemaforo(sem1, 0, 1, 0);
+        setSemaforo(sem2, 0, 1, 0);
+        actuar();
+        Serial.println("🎤 Todos los semáforos en amarillo");
+    }
+
+    // Protocolos especiales
+    else if (comando == "ambulancia")
+    {
+        modoControl = "ambulancia";
+        setSemaforo(sem1, 0, 1, 0); // Cambiar a amarillo en lugar de rojo
+        setSemaforo(sem2, 0, 1, 0); // Cambiar a amarillo en lugar de rojo
+        actuar();
+        Serial.println("🎤 🚑 PROTOCOLO AMBULANCIA - Todos en amarillo");
+    }
+    else if (comando == "reiniciar")
+    {
+        modoControl = "automatico";
+        estadoMarkov = "Normal";
+        adaptarTiemposSemaforo();
+        Serial.println("🎤 Sistema reiniciado");
+    }
+
+    else
+    {
+        Serial.println("🎤 ❓ Comando de voz no reconocido: " + comando);
     }
 }
 
@@ -256,16 +385,24 @@ void setup()
         delay(1000);
     }
     Serial.println("\nConnected to WiFi");
+    Serial.print("ESP32 IP: ");
+    Serial.println(WiFi.localIP());
 
-    // Setup WebSocket client (ws, para pruebas locales)
-    webSocket.begin("192.168.80.24", 8765, "/");
-    webSocket.onEvent(webSocketEvent);
-    webSocket.setReconnectInterval(5000);
+    // Setup WebSocket client para servidor Markov
+    webSocketMarkov.begin("192.168.80.24", 8765, "/");
+    webSocketMarkov.onEvent(webSocketMarkovEvent);
+    webSocketMarkov.setReconnectInterval(5000);
+
+    // Setup WebSocket server para comandos de voz
+    webSocketVoz.begin();
+    webSocketVoz.onEvent(webSocketVozEvent);
+    Serial.println("Voice WebSocket server started on port 8766");
 }
 
 void loop()
 {
-    webSocket.loop();
+    webSocketMarkov.loop(); // Mantener conexión con servidor Markov
+    webSocketVoz.loop();    // Mantener servidor para comandos de voz
 
     // Lote 1: Lectura de sensores
     ldr1Value = analogRead(LDR1);
@@ -335,7 +472,7 @@ void loop()
 
     // --- Envío de datos al servidor Markov cada 2 segundos ---
     unsigned long now = millis();
-    if (now - lastSent > interval && webSocket.isConnected())
+    if (now - lastSent > interval && webSocketMarkov.isConnected())
     {
         lastSent = now;
         // Enviar todos los datos relevantes al servidor Markov
@@ -351,7 +488,7 @@ void loop()
         doc["esNoche"] = (ldr1Value < 400 && ldr2Value < 400);
         String json;
         serializeJson(doc, json);
-        webSocket.sendTXT(json);
+        webSocketMarkov.sendTXT(json);
         Serial.println("Sent to Markov: " + json);
     }
 
@@ -363,8 +500,8 @@ void loop()
     static bool prioridadPeaton1 = false;
     static bool prioridadPeaton2 = false;
 
-    // MODO NOCTURNO: Parpadeo amarillo para seguridad
-    if (esNoche)
+    // MODO NOCTURNO: Parpadeo amarillo para seguridad O comando de voz
+    if (esNoche || modoControl == "nocturno")
     {
         // En modo nocturno, ambos semáforos parpadean en amarillo
         static unsigned long tiempoParpadeo = 0;
@@ -389,6 +526,40 @@ void loop()
             }
             actuar();
         }
+    }
+    // MODO EMERGENCIA: Todos en rojo
+    else if (modoControl == "emergencia")
+    {
+        setSemaforo(sem1, 1, 0, 0);
+        setSemaforo(sem2, 1, 0, 0);
+        actuar();
+
+        // Auto-reset después de 60 segundos (aumentado de 30)
+        if (millis() - tiempoComandoVoz > 60000)
+        {
+            modoControl = "automatico";
+            Serial.println("🎤 Modo emergencia auto-desactivado");
+        }
+    }
+    // MODO AMBULANCIA: Todos en amarillo
+    else if (modoControl == "ambulancia")
+    {
+        setSemaforo(sem1, 0, 1, 0);
+        setSemaforo(sem2, 0, 1, 0);
+        actuar();
+
+        // Auto-reset después de 45 segundos
+        if (millis() - tiempoComandoVoz > 45000)
+        {
+            modoControl = "automatico";
+            Serial.println("🎤 Protocolo ambulancia completado");
+        }
+    }
+    // MODO MANUAL: No hacer nada automático, esperar comandos
+    else if (modoControl == "manual")
+    {
+        // Los semáforos se controlan solo por comandos de voz
+        // No ejecutar lógica automática
     }
     else
     {
@@ -523,11 +694,23 @@ void loop()
         lcd.print("s CO2:");
         lcd.print(co2Value);
 
-        // Línea 2: Modo día/noche y estado semáforo
+        // Línea 2: Modo día/noche, estado semáforo y CONTROL DE VOZ
         lcd.setCursor(0, 2);
-        if (esNoche)
+        if (esNoche || modoControl == "nocturno")
         {
             lcd.print("NOCHE PARPADEO ON   ");
+        }
+        else if (modoControl == "emergencia")
+        {
+            lcd.print("EMERGENCIA   ");
+        }
+        else if (modoControl == "ambulancia")
+        {
+            lcd.print("AMBULANCIA   ");
+        }
+        else if (modoControl == "manual")
+        {
+            lcd.print("CONTROL MANUAL  ");
         }
         else
         {
@@ -586,7 +769,8 @@ void loop()
     unsigned long startDelay = millis();
     while (millis() - startDelay < 2000)
     {
-        webSocket.loop();
-        delay(10); // Pequeño delay para no saturar el CPU
+        webSocketMarkov.loop(); // Mantener conexión Markov
+        webSocketVoz.loop();    // Mantener servidor de voz
+        delay(10);              // Pequeño delay para no saturar el CPU
     }
 }

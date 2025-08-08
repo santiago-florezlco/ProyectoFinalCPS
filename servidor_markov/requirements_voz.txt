@@ -1,0 +1,10 @@
+# Dependencias para el Sistema de Control por Voz
+SpeechRecognition
+pyttsx3
+websocket-client
+pyaudio
+
+# Dependencias del proyecto existente
+websockets==10.4
+numpy
+asyncio
