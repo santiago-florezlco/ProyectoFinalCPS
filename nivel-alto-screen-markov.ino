@@ -61,6 +61,12 @@ WebSocketsClient webSocket;
 unsigned long lastSent = 0;
 const unsigned long interval = 2000;
 
+// Variables para adaptación dinámica basada en estado Markov
+String estadoMarkov = "Normal";  // Estado recibido del servidor
+int tiempoVerde1Adaptado = 6000; // Tiempos adaptativos
+int tiempoVerde2Adaptado = 6000;
+int tiempoAmarilloAdaptado = 2000;
+
 // Handle incoming WebSocket messages
 void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
 {
@@ -84,7 +90,19 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
             Serial.println(error.c_str());
             break;
         }
-        // Leer el valor del sensor remoto
+
+        // LOTE 3: Adaptación dinámica basada en estado Markov
+        if (doc.containsKey("estado"))
+        {
+            estadoMarkov = doc["estado"].as<String>();
+            Serial.print("Estado Markov recibido: ");
+            Serial.println(estadoMarkov);
+
+            // Adaptar tiempos de semáforo según estado Markov
+            adaptarTiemposSemaforo();
+        }
+
+        // Mantener compatibilidad con código anterior
         if (doc.containsKey("msg"))
         {
             sensorRemoto = doc["msg"];
@@ -95,6 +113,35 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
     break;
     default:
         break;
+    }
+}
+
+// LOTE 3: Función para adaptar tiempos según estado Markov
+void adaptarTiemposSemaforo()
+{
+    if (estadoMarkov == "Normal")
+    {
+        // Tráfico normal - tiempos estándar
+        tiempoVerde1Adaptado = 6000;
+        tiempoVerde2Adaptado = 6000;
+        tiempoAmarilloAdaptado = 2000;
+        Serial.println("[ADAPTACIÓN] Modo Normal: tiempos estándar");
+    }
+    else if (estadoMarkov == "Moderado")
+    {
+        // Tráfico moderado - tiempos ligeramente extendidos
+        tiempoVerde1Adaptado = 8000;
+        tiempoVerde2Adaptado = 8000;
+        tiempoAmarilloAdaptado = 2500;
+        Serial.println("[ADAPTACIÓN] Modo Moderado: tiempos extendidos");
+    }
+    else if (estadoMarkov == "Congestionado")
+    {
+        // Tráfico congestionado - tiempos largos para descongestionar
+        tiempoVerde1Adaptado = 10000;
+        tiempoVerde2Adaptado = 10000;
+        tiempoAmarilloAdaptado = 3000;
+        Serial.println("[ADAPTACIÓN] Modo Congestionado: tiempos largos");
     }
 }
 
@@ -211,7 +258,7 @@ void setup()
     Serial.println("\nConnected to WiFi");
 
     // Setup WebSocket client (ws, para pruebas locales)
-    webSocket.begin("192.168.80.18", 8765, "/");
+    webSocket.begin("192.168.80.24", 8765, "/");
     webSocket.onEvent(webSocketEvent);
     webSocket.setReconnectInterval(5000);
 }
@@ -311,155 +358,228 @@ void loop()
     static bool enPrioridad = false;
     static unsigned long tiniAdapt = 0;
     static int estadoAdapt = 0;
-    static int tiempoVerde1 = 6000;
-    static int tiempoVerde2 = 6000;
-    static int tiempoAmarillo = 2000;
-    static int tiempoRojo = 0; // No usado explícitamente
 
-    // --- Lógica adaptativa de semáforos ---
-    // Ajuste de tiempos según tráfico y condiciones
-    // Verde más largo si hay más vehículos, más corto si hay pocos
-    if (vehiculosSem1 > vehiculosSem2)
-    {
-        tiempoVerde1 = 8000;
-        tiempoVerde2 = 4000;
-    }
-    else if (vehiculosSem2 > vehiculosSem1)
-    {
-        tiempoVerde1 = 4000;
-        tiempoVerde2 = 8000;
-    }
-    else
-    {
-        tiempoVerde1 = 6000;
-        tiempoVerde2 = 6000;
-    }
-    // Si hay CO2 alto, reducir ambos verdes para evitar congestión
-    if (co2Alto)
-    {
-        tiempoVerde1 -= 2000;
-        tiempoVerde2 -= 2000;
-        if (tiempoVerde1 < 2000)
-            tiempoVerde1 = 2000;
-        if (tiempoVerde2 < 2000)
-            tiempoVerde2 = 2000;
-    }
-    // Si es de noche, aumentar amarillo
-    if (esNoche)
-    {
-        tiempoAmarillo = 3000;
-    }
-    else
-    {
-        tiempoAmarillo = 2000;
-    }
-
-    // Prioridad peatón: si hay peatón esperando, forzar verde peatonal en el siguiente ciclo
+    // Variables para prioridad peatonal (deben ser accesibles en modo día y noche)
     static bool prioridadPeaton1 = false;
     static bool prioridadPeaton2 = false;
+
+    // MODO NOCTURNO: Parpadeo amarillo para seguridad
+    if (esNoche)
+    {
+        // En modo nocturno, ambos semáforos parpadean en amarillo
+        static unsigned long tiempoParpadeo = 0;
+        static bool estadoParpadeo = false;
+
+        if (millis() - tiempoParpadeo >= 1000) // Parpadeo cada 1 segundo
+        {
+            estadoParpadeo = !estadoParpadeo;
+            tiempoParpadeo = millis();
+
+            if (estadoParpadeo)
+            {
+                // Ambos amarillos encendidos
+                setSemaforo(sem1, 0, 1, 0);
+                setSemaforo(sem2, 0, 1, 0);
+            }
+            else
+            {
+                // Ambos amarillos apagados
+                setSemaforo(sem1, 0, 0, 0);
+                setSemaforo(sem2, 0, 0, 0);
+            }
+            actuar();
+        }
+    }
+    else
+    {
+        // MODO DIURNO: Lógica normal de semáforos adaptativa
+
+        // LOTE 3: Usar tiempos adaptados por estado Markov en lugar de lógica local
+        // Los tiempos ahora vienen del servidor Markov global
+        int tiempoVerde1 = tiempoVerde1Adaptado;
+        int tiempoVerde2 = tiempoVerde2Adaptado;
+        int tiempoAmarillo = tiempoAmarilloAdaptado;
+
+        // --- LÓGICA ADAPTATIVA HÍBRIDA: Markov + Local ---
+        // Ajustes finos basados en condiciones locales inmediatas
+        // (El estado Markov da la base, los sensores locales hacen ajustes menores)
+
+        // Ajuste fino por diferencia de tráfico entre carriles
+        if (vehiculosSem1 > vehiculosSem2 + 1)
+        {
+            tiempoVerde1 += 1000; // Pequeño incremento para carril más congestionado
+            tiempoVerde2 -= 500;  // Pequeña reducción para carril menos congestionado
+        }
+        else if (vehiculosSem2 > vehiculosSem1 + 1)
+        {
+            tiempoVerde2 += 1000; // Pequeño incremento para carril más congestionado
+            tiempoVerde1 -= 500;  // Pequeña reducción para carril menos congestionado
+        }
+
+        // Límites de seguridad
+        if (tiempoVerde1 < 3000)
+            tiempoVerde1 = 3000; // Mínimo 3 segundos
+        if (tiempoVerde2 < 3000)
+            tiempoVerde2 = 3000;
+        if (tiempoVerde1 > 15000)
+            tiempoVerde1 = 15000; // Máximo 15 segundos
+        if (tiempoVerde2 > 15000)
+            tiempoVerde2 = 15000;
+
+        // Prioridad peatón: si hay peatón esperando, forzar verde peatonal en el siguiente ciclo
+        if (peaton1)
+            prioridadPeaton1 = true;
+        if (peaton2)
+            prioridadPeaton2 = true;
+
+        medir();
+        unsigned long tdeltaAdapt = millis() - tiniAdapt;
+
+        // Estados: 0=Sem1 rojo/Sem2 verde, 1=Sem1 rojo/Sem2 amarillo, 2=Sem1 verde/Sem2 rojo, 3=Sem1 amarillo/Sem2 rojo
+        switch (estadoAdapt)
+        {
+        case 0: // Sem1 rojo, Sem2 verde - Peatón 2 puede cruzar aquí
+            setSemaforo(sem1, 1, 0, 0);
+            setSemaforo(sem2, 0, 0, 1);
+            if (tdeltaAdapt >= tiempoVerde2 || prioridadPeaton2) // Peatón 2 extiende el verde del Sem2
+            {
+                estadoAdapt = 1;
+                tiniAdapt = millis();
+            }
+            break;
+        case 1: // Sem1 rojo, Sem2 amarillo
+            setSemaforo(sem1, 1, 0, 0);
+            setSemaforo(sem2, 0, 1, 0);
+            if (tdeltaAdapt >= tiempoAmarillo)
+            {
+                estadoAdapt = 2;
+                tiniAdapt = millis();
+                if (prioridadPeaton2)
+                    prioridadPeaton2 = false;
+            }
+            break;
+        case 2: // Sem1 verde, Sem2 rojo - Peatón 1 puede cruzar aquí
+            setSemaforo(sem1, 0, 0, 1);
+            setSemaforo(sem2, 1, 0, 0);
+            if (tdeltaAdapt >= tiempoVerde1 || prioridadPeaton1) // Peatón 1 extiende el verde del Sem1
+            {
+                estadoAdapt = 3;
+                tiniAdapt = millis();
+            }
+            break;
+        case 3: // Sem1 amarillo, Sem2 rojo
+            setSemaforo(sem1, 0, 1, 0);
+            setSemaforo(sem2, 1, 0, 0);
+            if (tdeltaAdapt >= tiempoAmarillo)
+            {
+                estadoAdapt = 0;
+                tiniAdapt = millis();
+                if (prioridadPeaton1)
+                    prioridadPeaton1 = false;
+            }
+            break;
+        default:
+            estadoAdapt = 0;
+            tiniAdapt = millis();
+            break;
+        }
+        actuar();
+    }
+
+    // Actualizar estado de peatones (común para día y noche)
     if (peaton1)
         prioridadPeaton1 = true;
     if (peaton2)
         prioridadPeaton2 = true;
 
-    medir();
-    unsigned long tdeltaAdapt = millis() - tiniAdapt;
-
-    // Estados: 0=Sem1 rojo/Sem2 verde, 1=Sem1 rojo/Sem2 amarillo, 2=Sem1 verde/Sem2 rojo, 3=Sem1 amarillo/Sem2 rojo
-    switch (estadoAdapt)
+    // --- Lote 4: Mostrar información en el display I2C (con control para evitar errores I2C) ---
+    static unsigned long ultimoUpdateLCD = 0;
+    if (millis() - ultimoUpdateLCD >= 500) // Actualizar LCD cada 500ms para evitar sobrecarga I2C
     {
-    case 0: // Sem1 rojo, Sem2 verde
-        setSemaforo(sem1, 1, 0, 0);
-        setSemaforo(sem2, 0, 0, 1);
-        if (tdeltaAdapt >= tiempoVerde2 || prioridadPeaton1)
+        ultimoUpdateLCD = millis();
+
+        lcd.clear();
+
+        // Línea 0: Estado Markov y tráfico
+        lcd.setCursor(0, 0);
+        lcd.print("Markov:");
+        if (estadoMarkov == "Normal")
+            lcd.print("NOR");
+        else if (estadoMarkov == "Moderado")
+            lcd.print("MOD");
+        else if (estadoMarkov == "Congestionado")
+            lcd.print("CON");
+        lcd.print(" S1:");
+        lcd.print(vehiculosSem1);
+        lcd.print(" S2:");
+        lcd.print(vehiculosSem2);
+
+        // Línea 1: Tiempos adaptados y CO2
+        lcd.setCursor(0, 1);
+        lcd.print("T:");
+        lcd.print(tiempoVerde1Adaptado / 1000);
+        lcd.print("/");
+        lcd.print(tiempoVerde2Adaptado / 1000);
+        lcd.print("s CO2:");
+        lcd.print(co2Value);
+
+        // Línea 2: Modo día/noche y estado semáforo
+        lcd.setCursor(0, 2);
+        if (esNoche)
         {
-            estadoAdapt = 1;
-            tiniAdapt = millis();
+            lcd.print("NOCHE PARPADEO ON   ");
         }
-        break;
-    case 1: // Sem1 rojo, Sem2 amarillo
-        setSemaforo(sem1, 1, 0, 0);
-        setSemaforo(sem2, 0, 1, 0);
-        if (tdeltaAdapt >= tiempoAmarillo)
+        else
         {
-            estadoAdapt = 2;
-            tiniAdapt = millis();
-            if (prioridadPeaton1)
-                prioridadPeaton1 = false;
+            lcd.print("DIA   Est:");
+            lcd.print(estadoAdapt);
+            lcd.print(" T:");
+            lcd.print((millis() - tiniAdapt) / 1000);
+            lcd.print("s");
         }
-        break;
-    case 2: // Sem1 verde, Sem2 rojo
-        setSemaforo(sem1, 0, 0, 1);
-        setSemaforo(sem2, 1, 0, 0);
-        if (tdeltaAdapt >= tiempoVerde1 || prioridadPeaton2)
+
+        // Línea 3: Mensajes inteligentes para peatones
+        lcd.setCursor(0, 3);
+        if (esNoche)
         {
-            estadoAdapt = 3;
-            tiniAdapt = millis();
+            lcd.print("MODO NOCTURNO       ");
         }
-        break;
-    case 3: // Sem1 amarillo, Sem2 rojo
-        setSemaforo(sem1, 0, 1, 0);
-        setSemaforo(sem2, 1, 0, 0);
-        if (tdeltaAdapt >= tiempoAmarillo)
+        else
         {
-            estadoAdapt = 0;
-            tiniAdapt = millis();
-            if (prioridadPeaton2)
-                prioridadPeaton2 = false;
+            // Lógica basada en prioridades peatonales y seguridad de cruce
+            if (peaton1 && !prioridadPeaton1 && peaton2 && !prioridadPeaton2)
+            {
+                lcd.print("P1&P2: Espere       ");
+            }
+            else if (peaton1 && !prioridadPeaton1)
+            {
+                lcd.print("P1: Espere verde    ");
+            }
+            else if (peaton2 && !prioridadPeaton2)
+            {
+                lcd.print("P2: Espere verde    ");
+            }
+            else if (prioridadPeaton1 && (estadoAdapt == 0)) // P1 puede cruzar cuando Sem1 está rojo
+            {
+                lcd.print("P1: Cruce ahora     ");
+            }
+            else if (prioridadPeaton2 && (estadoAdapt == 2)) // P2 puede cruzar cuando Sem2 está rojo
+            {
+                lcd.print("P2: Cruce ahora     ");
+            }
+            else if (prioridadPeaton1)
+            {
+                lcd.print("P1: Espere cruce    ");
+            }
+            else if (prioridadPeaton2)
+            {
+                lcd.print("P2: Espere cruce    ");
+            }
+            else
+            {
+                lcd.print("Peatones: ---       ");
+            }
         }
-        break;
-    default:
-        estadoAdapt = 0;
-        tiniAdapt = millis();
-        break;
-    }
-    actuar();
-
-    // --- Lote 4: Mostrar información en el display I2C (mejorado) ---
-    lcd.clear();
-    // Línea 0: Conteo de vehículos
-    lcd.setCursor(0, 0);
-    lcd.print("Trafico S1:");
-    lcd.print(vehiculosSem1);
-    lcd.print(" S2:");
-    lcd.print(vehiculosSem2);
-
-    // Línea 1: Calidad del aire
-    lcd.setCursor(0, 1);
-    lcd.print("CO2: ");
-    lcd.print(co2Value);
-    lcd.print(co2Alto ? " ALTO" : " OK  ");
-
-    // Línea 2: Modo día/noche
-    lcd.setCursor(0, 2);
-    lcd.print("Modo: ");
-    lcd.print(esNoche ? "NOCHE " : "DIA   ");
-
-    // Línea 3: Mensajes inteligentes para peatones
-    lcd.setCursor(0, 3);
-    if (peaton1 && !prioridadPeaton1 && peaton2 && !prioridadPeaton2)
-    {
-        lcd.print("P1: Espere verde  ");
-    }
-    else if (peaton1 && !prioridadPeaton1)
-    {
-        lcd.print("P1: Espere verde  ");
-    }
-    else if (peaton2 && !prioridadPeaton2)
-    {
-        lcd.print("P2: Espere verde  ");
-    }
-    else if (prioridadPeaton1)
-    {
-        lcd.print("P1: Cruce ahora   ");
-    }
-    else if (prioridadPeaton2)
-    {
-        lcd.print("P2: Cruce ahora   ");
-    }
-    else
-    {
-        lcd.print("Peatones: ---    ");
     }
 
     // Espera 2 segundos mostrando en LCD y manteniendo la conexión WebSocket
